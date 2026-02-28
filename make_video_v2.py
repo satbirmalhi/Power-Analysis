@@ -35,13 +35,13 @@ RED    = (255, 80,  80 )
 GRAY   = (160, 160, 160)
 
 # Layout
-PAD_X      = 65
-TITLE_Y    = 32
-BODY_Y     = 105
-LINE_H     = 62
-TITLE_SZ   = 38
-BODY_SZ    = 34
-HW_SZ      = 36
+PAD_X      = 80
+TITLE_Y    = 38
+BODY_Y     = 115
+LINE_H     = 68
+TITLE_SZ   = 40
+BODY_SZ    = 36
+HW_SZ      = 38
 
 # Face cam (top-right corner)
 FC_W, FC_H = 200, 148
@@ -59,16 +59,20 @@ def _try_fonts(candidates, size):
 
 def font_title(size=TITLE_SZ):
     return _try_fonts([
-        '/System/Library/Fonts/HelveticaNeue.ttc',
-        '/System/Library/Fonts/Helvetica.ttc',
-        '/Library/Fonts/Arial.ttf',
+        '/System/Library/Fonts/Palatino.ttc',
+        '/Library/Fonts/Palatino.ttf',
+        '/Library/Fonts/Georgia.ttf',
+        '/System/Library/Fonts/Times.ttc',
+        '/Library/Fonts/Times New Roman.ttf',
     ], size)
 
 def font_body(size=BODY_SZ):
     return _try_fonts([
-        '/System/Library/Fonts/HelveticaNeue.ttc',
-        '/System/Library/Fonts/Helvetica.ttc',
-        '/Library/Fonts/Arial.ttf',
+        '/System/Library/Fonts/Palatino.ttc',
+        '/Library/Fonts/Palatino.ttf',
+        '/Library/Fonts/Georgia.ttf',
+        '/System/Library/Fonts/Times.ttc',
+        '/Library/Fonts/Times New Roman.ttf',
     ], size)
 
 def font_chalk(size=HW_SZ):
@@ -114,9 +118,15 @@ def render_frame(title, typed_lines, hw_lines, hw_partial=None, fc_idx=0):
     fb = font_body()
     fc = font_chalk()
 
-    # ── Title ──────────────────────────────────────────────────────────────────
+    # ── Title: yellow keyword || white subtitle ────────────────────────────────
     if title:
-        draw.text((PAD_X, TITLE_Y), title, fill=YELLOW, font=ft)
+        parts = title.split("||", 1)
+        yellow_text = parts[0]          # e.g. "Power Analysis "
+        white_text  = "|| " + parts[1].strip() if len(parts) > 1 and parts[1].strip() else ("||" if "||" in title else "")
+        draw.text((PAD_X, TITLE_Y), yellow_text, fill=YELLOW, font=ft)
+        if white_text:
+            bbox = draw.textbbox((PAD_X, TITLE_Y), yellow_text, font=ft)
+            draw.text((bbox[2], TITLE_Y), white_text, fill=WHITE, font=ft)
 
     # ── Typed body text ────────────────────────────────────────────────────────
     for i, (text, color) in enumerate(typed_lines):
@@ -126,7 +136,7 @@ def render_frame(title, typed_lines, hw_lines, hw_partial=None, fc_idx=0):
         draw.text((PAD_X, y), text, fill=color or WHITE, font=fb)
 
     # ── Handwritten lines ──────────────────────────────────────────────────────
-    hw_start_y = BODY_Y + len(typed_lines) * LINE_H + 20
+    hw_start_y = BODY_Y + len(typed_lines) * LINE_H + 30
 
     for i, (text, color) in enumerate(hw_lines):
         y = hw_start_y + i * LINE_H
@@ -158,49 +168,55 @@ def render_frame(title, typed_lines, hw_lines, hw_partial=None, fc_idx=0):
 # ─── Build frames for one section ─────────────────────────────────────────────
 def build_frames(title, typed_lines, hw_lines, duration_sec, fc_start=0):
     """
-    Reveal typed_lines all at once, then reveal hw_lines char-by-char.
-    Stretches to fit duration_sec.
+    Reveal typed_lines all at once, then reveal hw_lines char-by-char
+    at a fixed writing speed (~10 chars/sec), then hold the final frame.
     """
+    n_total        = max(1, int(duration_sec * FPS))
+    total_chars    = sum(len(t) for t, c in hw_lines if t.strip())
+    # Each character is shown for this many frames (min 2 = ~12 chars/sec at 24fps)
+    frames_per_char = max(2, min(3, int(FPS * 0.80 * duration_sec) // max(1, total_chars)))
+
     frame_list = []
     fc_idx     = fc_start
 
-    # First frame — show only title + typed text, no handwriting yet
-    frame_list.append(render_frame(title, typed_lines, [], fc_idx=fc_idx))
-    fc_idx += 1
+    # Hold on typed text for 0.5s before writing starts
+    intro_f    = render_frame(title, typed_lines, [], fc_idx=fc_idx)
+    intro_hold = int(FPS * 0.5)
+    frame_list += [intro_f] * intro_hold
+    fc_idx     += intro_hold
 
     # Reveal each handwritten line character by character
     revealed_hw = []
     for line_text, line_color in hw_lines:
         if not line_text.strip():
             revealed_hw.append((line_text, line_color))
-            frame_list.append(render_frame(title, typed_lines, revealed_hw, fc_idx=fc_idx))
+            f = render_frame(title, typed_lines, revealed_hw, fc_idx=fc_idx)
+            frame_list.append(f)
             fc_idx += 1
             continue
         for c in range(1, len(line_text) + 1):
-            frame_list.append(render_frame(
+            f = render_frame(
                 title, typed_lines, revealed_hw,
                 hw_partial=(line_text, c, line_color),
                 fc_idx=fc_idx
-            ))
-            fc_idx += 1
+            )
+            frame_list += [f] * frames_per_char
+            fc_idx     += frames_per_char
         revealed_hw.append((line_text, line_color))
 
-    # Hold on final frame
-    hold = int(FPS * 0.5)
-    final_f = render_frame(title, typed_lines, revealed_hw, fc_idx=fc_idx)
-    frame_list += [final_f] * hold
+    # Hold the completed slide for the rest of the audio duration
+    final_f    = render_frame(title, typed_lines, revealed_hw, fc_idx=fc_idx)
+    hold_count = max(1, n_total - len(frame_list))
+    frame_list += [final_f] * hold_count
 
-    # Stretch to target duration
-    n_target = max(1, int(duration_sec * FPS))
-    indices  = np.linspace(0, len(frame_list) - 1, n_target).astype(int)
-    return [frame_list[i] for i in indices], fc_idx
+    return frame_list[:n_total], fc_idx
 
 # ─── Voice cloning ────────────────────────────────────────────────────────────
 def generate_voice(text, out_path, voice_sample):
     """Generate voice using macOS Rishi (Indian-English male) via say command."""
     try:
         aiff_path = out_path.replace(".mp3", ".aiff")
-        result = os.system(f'say -v Rishi -r 175 -o "{aiff_path}" "{text}"')
+        result = os.system(f'say -v Rishi -r 150 -o "{aiff_path}" "{text}"')
         if result == 0 and os.path.exists(aiff_path):
             os.system(f'ffmpeg -i "{aiff_path}" "{out_path}" -y -loglevel error')
             os.remove(aiff_path)
