@@ -197,19 +197,17 @@ def build_frames(title, typed_lines, hw_lines, duration_sec, fc_start=0):
 
 # ─── Voice cloning ────────────────────────────────────────────────────────────
 def generate_voice(text, out_path, voice_sample):
-    """Clone voice using Coqui XTTS v2."""
+    """Generate voice using macOS Rishi (Indian-English male) via say command."""
     try:
-        from TTS.api import TTS as CoquiTTS
-        tts = CoquiTTS("tts_models/multilingual/multi-dataset/xtts_v2")
-        tts.tts_to_file(
-            text=text,
-            speaker_wav=voice_sample,
-            language="en",
-            file_path=out_path,
-        )
-        return True
+        aiff_path = out_path.replace(".mp3", ".aiff")
+        result = os.system(f'say -v Rishi -r 175 -o "{aiff_path}" "{text}"')
+        if result == 0 and os.path.exists(aiff_path):
+            os.system(f'ffmpeg -i "{aiff_path}" "{out_path}" -y -loglevel error')
+            os.remove(aiff_path)
+            return True
+        raise Exception("say command failed")
     except Exception as e:
-        print(f"  Voice cloning failed ({e}), falling back to gTTS...")
+        print(f"  macOS say failed ({e}), falling back to gTTS...")
         from gtts import gTTS
         gTTS(text, lang="en", slow=False).save(out_path)
         return False
